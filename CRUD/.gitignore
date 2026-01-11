@@ -1,0 +1,49 @@
+﻿####################################
+# .NET / ASP.NET Core (.NET 10)
+####################################
+
+# Build results
+bin/
+obj/
+out/
+publish/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# VS Code
+.vscode/
+
+# JetBrains Rider
+.idea/
+
+# NuGet
+packages/
+*.nupkg
+.nuget/
+
+# ASP.NET Core
+wwwroot/lib/
+
+# Environment-specific configs
+appsettings.*.json
+!appsettings.json
+
+# Secrets
+secrets.json
+*.secrets.json
+
+# Logs & temp
+*.log
+*.tmp
+
+# Test results
+TestResults/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
