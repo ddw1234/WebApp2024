@@ -79,7 +79,7 @@ namespace CRUD.Controllers
             return Ok(response);
         }
 
-        [HttpPost]
+        [HttpDelete]
         [Route("DeleteInformation")]
         public async Task<IActionResult> DeleteInformation(DeleteInformationRequest request)
         {
