@@ -12,58 +12,59 @@ namespace CRUD.RepositoryLayer
 {
     public class CrudAppliactionRL : ICrudAppliactionRL
     {
-        public readonly IConfiguration _configuration;
-        public readonly SqlConnection _sqlConnection;
-        public readonly MySqlConnection _mySqlConnection;
-        int ConnectionTimeOut = 180;
-        public CrudAppliactionRL(IConfiguration configuration)
+        private readonly IConfiguration _configuration;
+        private readonly MultiTenant.ITenantProvider _tenantProvider;
+        private readonly MultiTenant.ITenantsStore _tenantsStore;
+        private const int ConnectionTimeOut = 180;
+
+        public CrudAppliactionRL(IConfiguration configuration, MultiTenant.ITenantProvider tenantProvider, MultiTenant.ITenantsStore tenantsStore)
         {
             _configuration = configuration;
-            _sqlConnection = new SqlConnection(_configuration["ConnectionStrings:SqlServerDBConnection"]);
-            //_mySqlConnection = new MySqlConnection(_configuration["ConnectionStrings:MySqlDBConnection"]);
+            _tenantProvider = tenantProvider;
+            _tenantsStore = tenantsStore;
+        }
+
+        private SqlConnection CreateSqlConnection()
+        {
+            var connStr = _configuration["ConnectionStrings:SqlServerDBConnection"];
+            if (!string.IsNullOrEmpty(_tenantProvider?.TenantId) && _tenantsStore != null)
+            {
+                if (_tenantsStore.TryGetTenant(_tenantProvider.TenantId, out var tenant) && !string.IsNullOrEmpty(tenant.ConnectionString))
+                {
+                    connStr = tenant.ConnectionString;
+                }
+            }
+
+            return new SqlConnection(connStr);
         }
 
         public async Task<CreateInformationResponse> CreateInformation(CreateInformationRequest request)
         {
-            CreateInformationResponse resposne = new CreateInformationResponse();
-            resposne.IsSuccess = true;
-            resposne.Message = "Successful";
+            var resposne = new CreateInformationResponse { IsSuccess = true, Message = "Successful" };
             try
             {
-                //if (_mySqlConnection != null)
-                if(_sqlConnection != null)
+                using var conn = CreateSqlConnection();
+                string StoreProcedure = "SpCreateInformation";
+                using var sqlCommand = new SqlCommand(StoreProcedure, conn)
                 {
-                    string StoreProcedure = "SpCreateInformation";
-                    //using (MySqlCommand sqlCommand = new MySqlCommand(SqlQueries.CreateInformationQuery, _mySqlConnection))
-                    using (SqlCommand sqlCommand = new SqlCommand(StoreProcedure, _sqlConnection))
-                    {
-                        sqlCommand.CommandType = System.Data.CommandType.StoredProcedure;
-                        sqlCommand.CommandTimeout = ConnectionTimeOut;
-                        sqlCommand.Parameters.AddWithValue("@UserName", request.UserName);
-                        sqlCommand.Parameters.AddWithValue("@Age", request.Age);
-                        //await _mySqlConnection.OpenAsync();
-                        await _sqlConnection.OpenAsync();
-                        int Status = await sqlCommand.ExecuteNonQueryAsync();
-                        if (Status <= 0)
-                        {
-                            resposne.IsSuccess = false;
-                            resposne.Message = "CreateInformation Not Executed";
-                        }
-                    }
-                }
+                    CommandType = System.Data.CommandType.StoredProcedure,
+                    CommandTimeout = ConnectionTimeOut
+                };
 
+                sqlCommand.Parameters.AddWithValue("@UserName", request.UserName);
+                sqlCommand.Parameters.AddWithValue("@Age", request.Age);
+                await conn.OpenAsync();
+                int Status = await sqlCommand.ExecuteNonQueryAsync();
+                if (Status <= 0)
+                {
+                    resposne.IsSuccess = false;
+                    resposne.Message = "CreateInformation Not Executed";
+                }
             }
             catch (Exception ex)
             {
                 resposne.IsSuccess = false;
                 resposne.Message = "Exception Message : " + ex.Message;
-            }
-            finally
-            {
-                //await _mySqlConnection.CloseAsync();
-                //await _mySqlConnection.DisposeAsync();
-                await _sqlConnection.CloseAsync();
-                await _sqlConnection.DisposeAsync();
             }
 
             return resposne;
@@ -71,52 +72,47 @@ namespace CRUD.RepositoryLayer
 
         public async Task<ReadInformationResponse> ReadInformation()
         {
-            ReadInformationResponse response = new ReadInformationResponse();
-            response.readInformation = new List<ReadInformation>();
-            response.IsSuccess = true;
-            response.Message = "Successful";
+            var response = new ReadInformationResponse
+            {
+                readInformation = new List<ReadInformation>(),
+                IsSuccess = true,
+                Message = "Successful"
+            };
+
             try
             {
                 string StoreProcedure = "SpReadInformation";
-                //using (MySqlCommand sqlCommand = new MySqlCommand(SqlQueries.ReadInformation, _mySqlConnection))
-                using (SqlCommand sqlCommand = new SqlCommand(StoreProcedure, _sqlConnection))
+                using var conn = CreateSqlConnection();
+                using var sqlCommand = new SqlCommand(StoreProcedure, conn)
                 {
-                    sqlCommand.CommandType = System.Data.CommandType.StoredProcedure;
-                    sqlCommand.CommandTimeout = ConnectionTimeOut;
-                    //await _mySqlConnection.OpenAsync();
-                    await _sqlConnection.OpenAsync();
-                    //using (DbDataReader _sqlDataReader = await sqlCommand.ExecuteReaderAsync())
-                    using(SqlDataReader _sqlDataReader = await sqlCommand.ExecuteReaderAsync())
+                    CommandType = System.Data.CommandType.StoredProcedure,
+                    CommandTimeout = ConnectionTimeOut
+                };
+
+                await conn.OpenAsync();
+                using var reader = await sqlCommand.ExecuteReaderAsync();
+                if (reader.HasRows)
+                {
+                    while (await reader.ReadAsync())
                     {
-                        if (_sqlDataReader.HasRows)
+                        var getResponse = new ReadInformation
                         {
-                            while (await _sqlDataReader.ReadAsync())
-                            {
-                                ReadInformation getResponse = new ReadInformation();
-                                getResponse.UserID = _sqlDataReader["ID"] != DBNull.Value ? Convert.ToInt32(_sqlDataReader["ID"]) : 0;
-                                getResponse.UserName = _sqlDataReader["UserName"] != DBNull.Value ? _sqlDataReader["UserName"].ToString() : string.Empty;
-                                getResponse.Age = _sqlDataReader["Age"] != DBNull.Value ? Convert.ToInt32(_sqlDataReader["Age"]) : 0;
-                                response.readInformation.Add(getResponse);
-                            }
-                        }
-                        else
-                        {
-                            response.Message = "No data Return";
-                        }
+                            UserID = reader["ID"] != DBNull.Value ? Convert.ToInt32(reader["ID"]) : 0,
+                            UserName = reader["UserName"] != DBNull.Value ? reader["UserName"].ToString() : string.Empty,
+                            Age = reader["Age"] != DBNull.Value ? Convert.ToInt32(reader["Age"]) : 0
+                        };
+                        response.readInformation.Add(getResponse);
                     }
+                }
+                else
+                {
+                    response.Message = "No data Return";
                 }
             }
             catch (Exception ex)
             {
                 response.IsSuccess = false;
                 response.Message = "Exception Message : " + ex.Message;
-            }
-            finally
-            {
-                //await _mySqlConnection.CloseAsync();
-                //await _mySqlConnection.DisposeAsync();
-                await _sqlConnection.CloseAsync();
-                await _sqlConnection.DisposeAsync();
             }
 
             return response;
@@ -124,45 +120,32 @@ namespace CRUD.RepositoryLayer
 
         public async Task<UpdateInformationResponse> UpdateInformation(UpdateInformationRequest request)
         {
-            UpdateInformationResponse resposne = new UpdateInformationResponse();
-            resposne.IsSuccess = true;
-            resposne.Message = "Successful";
+            var resposne = new UpdateInformationResponse { IsSuccess = true, Message = "Successful" };
             try
             {
-                if (_sqlConnection != null)
+                using var conn = CreateSqlConnection();
+                string StoreProcedure = "SpUpdateInformation";
+                using var sqlCommand = new SqlCommand(StoreProcedure, conn)
                 {
-                    string StoreProcedure = "SpUpdateInformation";
-                    //using (MySqlCommand sqlCommand = new MySqlCommand(SqlQueries.UpdateInformation, _mySqlConnection))
-                    using (SqlCommand sqlCommand = new SqlCommand(StoreProcedure, _sqlConnection))
-                    {
-                        sqlCommand.CommandType = System.Data.CommandType.StoredProcedure;
-                        sqlCommand.CommandTimeout = ConnectionTimeOut;
-                        sqlCommand.Parameters.AddWithValue("@Id", request.UserId);
-                        sqlCommand.Parameters.AddWithValue("@UserName", request.UserName);
-                        sqlCommand.Parameters.AddWithValue("@Age", request.Age);
-                        //await _mySqlConnection.OpenAsync();
-                        await _sqlConnection.OpenAsync();
-                        int Status = await sqlCommand.ExecuteNonQueryAsync();
-                        if (Status <= 0)
-                        {
-                            resposne.IsSuccess = false;
-                            resposne.Message = "Information Not Update";
-                        }
-                    }
-                }
+                    CommandType = System.Data.CommandType.StoredProcedure,
+                    CommandTimeout = ConnectionTimeOut
+                };
 
+                sqlCommand.Parameters.AddWithValue("@Id", request.UserId);
+                sqlCommand.Parameters.AddWithValue("@UserName", request.UserName);
+                sqlCommand.Parameters.AddWithValue("@Age", request.Age);
+                await conn.OpenAsync();
+                int Status = await sqlCommand.ExecuteNonQueryAsync();
+                if (Status <= 0)
+                {
+                    resposne.IsSuccess = false;
+                    resposne.Message = "UpdateInformation Not Executed";
+                }
             }
             catch (Exception ex)
             {
                 resposne.IsSuccess = false;
                 resposne.Message = "Exception Message : " + ex.Message;
-            }
-            finally
-            {
-                //await _mySqlConnection.CloseAsync();
-                //await _mySqlConnection.DisposeAsync();
-                await _sqlConnection.CloseAsync();
-                await _sqlConnection.DisposeAsync();
             }
 
             return resposne;
@@ -170,60 +153,30 @@ namespace CRUD.RepositoryLayer
 
         public async Task<DeleteInformationResponse> DeleteInformation(DeleteInformationRequest request)
         {
-            DeleteInformationResponse resposne = new DeleteInformationResponse();
-            resposne.IsSuccess = true;
-            resposne.Message = "Successful";
+            var resposne = new DeleteInformationResponse { IsSuccess = true, Message = "Successful" };
             try
             {
-                if (_sqlConnection != null)
+                using var conn = CreateSqlConnection();
+                string StoreProcedure = "SpDeleteInformation";
+                using var sqlCommand = new SqlCommand(StoreProcedure, conn)
                 {
-                    string StoreProcedure = "SpDeleteInformation";
-                    //string SqlQuery = SqlQueries.DeleteInformation;
-                    //using (MySqlCommand sqlCommand = new MySqlCommand(StoreProcedure, _mySqlConnection))
-                    using (SqlCommand sqlCommand = new SqlCommand(StoreProcedure, _sqlConnection))
-                    {
-                        sqlCommand.CommandType = System.Data.CommandType.StoredProcedure;
-                        sqlCommand.CommandTimeout = ConnectionTimeOut;
-                        //sqlCommand.Parameters.AddWithValue("?UserId", request.UserId);
-                        sqlCommand.Parameters.AddWithValue("@Id", request.UserId);
-                        //await _mySqlConnection.OpenAsync();
-                        await _sqlConnection.OpenAsync();
-                        int Status = await sqlCommand.ExecuteNonQueryAsync();
-                        if (Status <= 0)
-                        {
-                            resposne.IsSuccess = false;
-                            resposne.Message = "UnSuccessful";
-                        }
-                       /* using (DbDataReader _sqlDataReader = await sqlCommand.ExecuteReaderAsync())
-                        {
-                            if (_sqlDataReader.HasRows)
-                            {
-                                await _sqlDataReader.ReadAsync();
-                                resposne.deleteInformation = new DeleteInformation();
-                                resposne.deleteInformation.UserID = _sqlDataReader["ID"] != DBNull.Value ? Convert.ToInt32(_sqlDataReader["ID"]) : 0;
-                                resposne.deleteInformation.UserName = _sqlDataReader["UserName"] != DBNull.Value ? _sqlDataReader["UserName"].ToString() : string.Empty;
-                                resposne.deleteInformation.Age = _sqlDataReader["Age"] != DBNull.Value ? Convert.ToInt32(_sqlDataReader["Age"]) : 0;
-                            }
-                            else
-                            {
-                                resposne.Message = "User Not Found";
-                            }
-                        }*/
-                    }
-                }
+                    CommandType = System.Data.CommandType.StoredProcedure,
+                    CommandTimeout = ConnectionTimeOut
+                };
 
+                sqlCommand.Parameters.AddWithValue("@Id", request.UserId);
+                await conn.OpenAsync();
+                int Status = await sqlCommand.ExecuteNonQueryAsync();
+                if (Status <= 0)
+                {
+                    resposne.IsSuccess = false;
+                    resposne.Message = "UnSuccessful";
+                }
             }
             catch (Exception ex)
             {
                 resposne.IsSuccess = false;
                 resposne.Message = "Exception Message : " + ex.Message;
-            }
-            finally
-            {
-                //await _mySqlConnection.CloseAsync();
-                //await _mySqlConnection.DisposeAsync();
-                await _sqlConnection.CloseAsync();
-                await _sqlConnection.DisposeAsync();
             }
 
             return resposne;
@@ -231,49 +184,37 @@ namespace CRUD.RepositoryLayer
 
         public async Task<SearchInformationByIdResponse> SearchInformationById(SearchInformationByIdRequest request)
         {
-            SearchInformationByIdResponse response = new SearchInformationByIdResponse();
-            response.IsSuccess = true;
-            response.Message = "Successful";
+            var response = new SearchInformationByIdResponse { IsSuccess = true, Message = "Successful" };
             try
             {
-                //using (MySqlCommand sqlCommand = new MySqlCommand(SqlQueries.SearchInformationById, _mySqlConnection))
-                using (SqlCommand sqlCommand = new SqlCommand(SqlQueries.ReadInformation,_sqlConnection))
+                using var conn = CreateSqlConnection();
+                using var sqlCommand = new SqlCommand(SqlQueries.ReadInformation, conn)
                 {
-                    sqlCommand.CommandType = System.Data.CommandType.Text;
-                    sqlCommand.CommandTimeout = ConnectionTimeOut;
-                    sqlCommand.Parameters.AddWithValue("@UserId", request.UserId);
-                    //await _mySqlConnection.OpenAsync();
-                    await _sqlConnection.OpenAsync();
-                    //using (DbDataReader _sqlDataReader = await sqlCommand.ExecuteReaderAsync())
-                    using(SqlDataReader _sqlDataReader = await sqlCommand.ExecuteReaderAsync())
+                    CommandType = System.Data.CommandType.Text,
+                    CommandTimeout = ConnectionTimeOut
+                };
+
+                sqlCommand.Parameters.AddWithValue("@UserId", request.UserId);
+                await conn.OpenAsync();
+                using var reader = await sqlCommand.ExecuteReaderAsync();
+                if (reader.HasRows)
+                {
+                    await reader.ReadAsync();
+                    response.searchInformationById = new SearchInformationById
                     {
-                        if (_sqlDataReader.HasRows)
-                        {
-                            await _sqlDataReader.ReadAsync();
-                            response.searchInformationById = new SearchInformationById();
-                            response.searchInformationById.UserName = _sqlDataReader["UserName"] != DBNull.Value ? _sqlDataReader["UserName"].ToString() : string.Empty;
-                            response.searchInformationById.Age = _sqlDataReader["Age"] != DBNull.Value ? Convert.ToInt32(_sqlDataReader["Age"]) : 0;
-
-
-                        }
-                        else
-                        {
-                            response.Message = "No data Found";
-                        }
-                    }
+                        UserName = reader["UserName"] != DBNull.Value ? reader["UserName"].ToString() : string.Empty,
+                        Age = reader["Age"] != DBNull.Value ? Convert.ToInt32(reader["Age"]) : 0
+                    };
+                }
+                else
+                {
+                    response.Message = "No data Found";
                 }
             }
             catch (Exception ex)
             {
                 response.IsSuccess = false;
                 response.Message = "Exception Message : " + ex.Message;
-            }
-            finally
-            {
-                //await _mySqlConnection.CloseAsync();
-                //await _mySqlConnection.DisposeAsync();
-                await _sqlConnection.CloseAsync();
-                await _sqlConnection.DisposeAsync();
             }
 
             return response;

@@ -1,5 +1,7 @@
 using CRUD.RepositoryLayer;
 using CRUD.ServiceLayer;
+using CRUD.MultiTenant;
+using Swashbuckle.AspNetCore.SwaggerGen;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -23,16 +25,25 @@ namespace CRUD
         {
             services.AddControllers();
 
+            // Bind tenants from configuration and register tenant store
+            services.AddMultiTenant(Configuration);
+
             #region Dependency Injection
 
             services.AddScoped<ICrudAppliactionSL, CrudAppliactionSL>();
             services.AddScoped<ICrudAppliactionRL, CrudAppliactionRL>();
 
+            // Multi-tenant support: tenant provider scoped per request
+            services.AddScoped<MultiTenant.ITenantProvider, MultiTenant.TenantProvider>();
+
             #endregion
 
             #region swagger Implementation
 
-            services.AddSwaggerGen();
+            services.AddSwaggerGen(c =>
+            {
+                c.OperationFilter<SwaggerTenantHeaderOperationFilter>();
+            });
 
             #endregion
         }
@@ -46,6 +57,9 @@ namespace CRUD
             }
 
             app.UseHttpsRedirection();
+
+            // Tenant resolution should run early in the pipeline so tenant info is available to later components
+            app.UseMiddleware<TenantResolutionMiddleware>();
 
             app.UseRouting();
 
