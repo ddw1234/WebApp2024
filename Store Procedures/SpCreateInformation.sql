@@ -1,4 +1,4 @@
-CREATE PROCEDURE CreateInformation
+CREATE PROCEDURE SpCreateInformation
 (
 	@UserName varchar(255),
 	@Age int
